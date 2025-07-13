@@ -28,6 +28,7 @@ let selectedFilter = 'none';
 let currentCameraDeviceId = null;
 let currentFacingMode = null; // 'user' (frontal) o 'environment' (trasera)
 let lastRecordedMimeType = ''; // Nueva variable para almacenar el MIME type de la última grabación
+let recordingStream = null; // Variable para almacenar el stream que usa mediaRecorder
 
 // --- VARIABLES Y CONFIGURACIÓN DE WEBG L ---
 let gl; // Contexto WebGL
@@ -649,17 +650,18 @@ recordBtn.addEventListener('click', async () => {
     console.log('Usando MIME type para grabación:', preferredMimeType);
     lastRecordedMimeType = preferredMimeType; // Store the MIME type used for recording
 
-    let streamToRecord = targetCanvas.captureStream();
-    // Add audio track from currentStream if available
+    // Creamos un nuevo MediaStream combinando el video del canvas y el audio del currentStream
+    recordingStream = targetCanvas.captureStream(); // Captura el video del canvas
     if (currentStream && currentStream.getAudioTracks().length > 0) {
-        streamToRecord.addTrack(currentStream.getAudioTracks()[0]);
+        recordingStream.addTrack(currentStream.getAudioTracks()[0]); // Añade la pista de audio
     }
 
-    mediaRecorder = new MediaRecorder(streamToRecord, { mimeType: preferredMimeType });
+    mediaRecorder = new MediaRecorder(recordingStream, { mimeType: preferredMimeType });
 
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) chunks.push(e.data);
     };
+
     mediaRecorder.onstop = async () => {
       const blob = new Blob(chunks, { type: lastRecordedMimeType }); // Use the stored MIME type for blob
       const url = URL.createObjectURL(blob);
@@ -673,7 +675,14 @@ recordBtn.addEventListener('click', async () => {
       vid.onloadedmetadata = () => {
         addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
       };
+
+      // Limpiar el stream de grabación después de que la grabación se haya detenido
+      if (recordingStream) {
+          recordingStream.getTracks().forEach(track => track.stop());
+          recordingStream = null; // Reiniciar la variable
+      }
     };
+
     mediaRecorder.start();
     isRecording = true;
     controls.style.display = 'none';
@@ -693,10 +702,19 @@ pauseBtn.addEventListener('click', () => {
 });
 
 stopBtn.addEventListener('click', () => {
-  mediaRecorder.stop();
-  isRecording = false;
-  controls.style.display = 'flex';
-  recordingControls.style.display = 'none';
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') { // Asegurarse de que mediaRecorder esté activo
+    mediaRecorder.stop();
+    isRecording = false;
+    controls.style.display = 'flex';
+    recordingControls.style.display = 'none';
+
+    // ¡NUEVA LÓGICA AQUÍ PARA DETENER LAS PISTAS DEL STREAM DE GRABACIÓN!
+    // Esto es crucial para liberar el micrófono y evitar repeticiones/bucles de audio.
+    if (recordingStream) {
+        recordingStream.getTracks().forEach(track => track.stop());
+        recordingStream = null; // Reiniciar la variable
+    }
+  }
 });
 
 filterBtn.addEventListener('click', () => {
@@ -725,9 +743,11 @@ fullscreenBtn.addEventListener('click', () => {
   }
 });
 
-function addToGallery(element, type, srcUrl, mimeTypeForDownload = '') { // Added mimeTypeForDownload parameter
+// Añadida la URL del objeto al dataset del contenedor para facilitar su revocación
+function addToGallery(element, type, srcUrl, mimeTypeForDownload = '') {
   let container = document.createElement('div');
   container.className = 'gallery-item';
+  container.dataset.srcUrl = srcUrl; // Guardar la URL en el dataset del contenedor
 
   // Clonar el elemento para la miniatura
   let thumbnail = element.cloneNode(true);
@@ -806,8 +826,10 @@ function addToGallery(element, type, srcUrl, mimeTypeForDownload = '') { // Adde
   let deleteBtn = document.createElement('button');
   deleteBtn.textContent = 'Eliminar';
   deleteBtn.onclick = () => {
-    if (type === 'video' && srcUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(srcUrl);
+    // Revocar la URL cuando se elimina el elemento de la galería
+    const itemUrl = container.dataset.srcUrl; // Usar la URL guardada en el dataset
+    if (itemUrl && itemUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(itemUrl);
     }
     container.remove();
   };
@@ -830,6 +852,10 @@ closeButton.addEventListener('click', () => {
     if (currentModalVideo) {
         currentModalVideo.pause();
         currentModalVideo.currentTime = 0; // Reset video to start
+        // ¡NUEVA LÓGICA AQUÍ! Revocar la URL del objeto si era un blob URL para liberar memoria
+        if (currentModalVideo.src && currentModalVideo.src.startsWith('blob:')) {
+            URL.revokeObjectURL(currentModalVideo.src);
+        }
     }
     modalContent.innerHTML = ''; // Clear content when closing
 });
@@ -842,7 +868,11 @@ window.addEventListener('click', (event) => {
         const currentModalVideo = modalContent.querySelector('video');
         if (currentModalVideo) {
             currentModalVideo.pause();
-            currentModalVideo.currentTime = 0; // Reset video to start
+            currentModalVideo.currentTime = 0;
+            // ¡NUEVA LÓGICA AQUÍ! Revocar la URL del objeto si era un blob URL para liberar memoria
+            if (currentModalVideo.src && currentModalVideo.src.startsWith('blob:')) {
+                URL.revokeObjectURL(currentModalVideo.src);
+            }
         }
         modalContent.innerHTML = ''; // Clear content when closing
     }
