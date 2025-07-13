@@ -652,8 +652,12 @@ recordBtn.addEventListener('click', async () => {
 
     // Creamos un nuevo MediaStream combinando el video del canvas y el audio del currentStream
     recordingStream = targetCanvas.captureStream(); // Captura el video del canvas
+    
+    // Almacenar una referencia a la pista de audio original si existe
+    let originalAudioTrack = null; 
     if (currentStream && currentStream.getAudioTracks().length > 0) {
-        recordingStream.addTrack(currentStream.getAudioTracks()[0]); // Añade la pista de audio
+        originalAudioTrack = currentStream.getAudioTracks()[0]; // Obtener la pista de audio original
+        recordingStream.addTrack(originalAudioTrack); // Añadir la pista de audio
     }
 
     mediaRecorder = new MediaRecorder(recordingStream, { mimeType: preferredMimeType });
@@ -676,11 +680,17 @@ recordBtn.addEventListener('click', async () => {
         addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
       };
 
-      // Limpiar el stream de grabación después de que la grabación se haya detenido
+      // Detener todas las pistas del recordingStream.
+      // Esto incluye la pista de video del canvas y la pista de audio que se añadió.
       if (recordingStream) {
           recordingStream.getTracks().forEach(track => track.stop());
           recordingStream = null; // Reiniciar la variable
       }
+      // Opcional: Si el problema persiste con el primer audio, puedes intentar descomentar la siguiente línea.
+      // Sin embargo, ten cuidado ya que podría silenciar el audio de la previsualización de la cámara en vivo.
+      // if (originalAudioTrack && originalAudioTrack.readyState === 'live') {
+      //     originalAudioTrack.stop();
+      // }
     };
 
     mediaRecorder.start();
@@ -708,11 +718,12 @@ stopBtn.addEventListener('click', () => {
     controls.style.display = 'flex';
     recordingControls.style.display = 'none';
 
-    // ¡NUEVA LÓGICA AQUÍ PARA DETENER LAS PISTAS DEL STREAM DE GRABACIÓN!
-    // Esto es crucial para liberar el micrófono y evitar repeticiones/bucles de audio.
+    // Asegurarse de que el recordingStream y sus pistas se detengan aquí también
+    // Esto es redundante con mediaRecorder.onstop, pero asegura la liberación
+    // incluso si onstop tiene un problema.
     if (recordingStream) {
         recordingStream.getTracks().forEach(track => track.stop());
-        recordingStream = null; // Reiniciar la variable
+        recordingStream = null;
     }
   }
 });
