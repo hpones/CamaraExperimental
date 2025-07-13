@@ -30,6 +30,9 @@ let currentFacingMode = null; // 'user' (frontal) o 'environment' (trasera)
 let lastRecordedMimeType = ''; // Nueva variable para almacenar el MIME type de la última grabación
 let recordingStream = null; // Variable crucial para almacenar el stream de grabación y sus pistas
 
+// *** NUEVA VARIABLE PARA CONTROLAR LA PRIMERA GRABACIÓN ***
+let isFirstRecording = true; 
+
 // --- VARIABLES Y CONFIGURACIÓN DE WEBG L ---
 let gl; // Contexto WebGL
 let program; // Programa de shaders
@@ -674,7 +677,20 @@ recordBtn.addEventListener('click', async () => {
       vid.loop = true; // Loop for better preview experience
 
       vid.onloadedmetadata = () => {
-        addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
+        // *** Lógica para manejar la primera grabación ***
+        if (isFirstRecording) {
+            console.warn("Primera grabación completada. No se guardará en la galería para evitar errores de audio iniciales. Por favor, graba de nuevo.");
+            alert("Primera grabación completada (solo inicialización). Por favor, graba de nuevo para guardar el video.");
+            isFirstRecording = false; // Desactivar el flag después de la primera "inicialización"
+            // Opcional: Cerrar el modal automáticamente después del mensaje
+            previewModal.style.display = 'none'; 
+            // Revocar la URL del blob de inmediato para liberar recursos
+            if (vid.src && vid.src.startsWith('blob:')) {
+                URL.revokeObjectURL(vid.src);
+            }
+        } else {
+            addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
+        }
       };
 
       // *** IMPORTANTE: Detener todas las pistas del recordingStream aquí ***
@@ -684,7 +700,7 @@ recordBtn.addEventListener('click', async () => {
           recordingStream = null; // Limpiar la referencia para la próxima grabación
       }
       
-      // *** NUEVA ADICIÓN: Desconectar explícitamente el nodo fuente del micrófono ***
+      // *** Desconectar explícitamente el nodo fuente del micrófono ***
       // Esto asegura que no queden conexiones de audio "colgadas" del stream en vivo.
       if (microphone) {
           microphone.disconnect();
@@ -725,7 +741,7 @@ stopBtn.addEventListener('click', () => {
         recordingStream = null; // Limpiar la referencia
     }
 
-    // *** NUEVA ADICIÓN: Desconectar explícitamente el nodo fuente del micrófono aquí también ***
+    // *** Desconectar explícitamente el nodo fuente del micrófono aquí también ***
     if (microphone) {
         microphone.disconnect();
         // No nullificamos 'microphone' aquí, 'startCamera' lo reconectará.
