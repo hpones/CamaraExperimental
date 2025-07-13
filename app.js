@@ -19,7 +19,7 @@ let previewModal = document.getElementById('previewModal');
 let closeButton = document.querySelector('.close-button');
 let modalContent = document.querySelector('.modal-content');
 
-let currentStream;
+let currentStream; // Este es el stream original de getUserMedia (video + audio de la cámara)
 let mediaRecorder;
 let chunks = [];
 let isRecording = false;
@@ -28,7 +28,7 @@ let selectedFilter = 'none';
 let currentCameraDeviceId = null;
 let currentFacingMode = null; // 'user' (frontal) o 'environment' (trasera)
 let lastRecordedMimeType = ''; // Nueva variable para almacenar el MIME type de la última grabación
-let recordingStream = null; // Variable crucial para almacenar el stream de grabación y sus pistas
+let recordingStreamForRecorder = null; // Renombrado para mayor claridad: este es el stream que pasamos al MediaRecorder
 
 // *** NUEVA VARIABLE PARA CONTROLAR LA PRIMERA GRABACIÓN ***
 let isFirstRecording = true; 
@@ -45,7 +45,7 @@ let timeLocation; // Ubicación del uniform para el tiempo (para efectos dinámi
 // --- VARIABLES Y CONFIGURACIÓN DE AUDIO ---
 let audioContext;
 let analyser;
-let microphone; // NODO CRUCIAL DEL MICROFONO
+let microphone; // NODO CRUCIAL DEL MICROFONO (MediaStreamSource)
 let dataArray;
 const AUDIO_THRESHOLD = 0.15;
 
@@ -371,6 +371,7 @@ async function listCameras() {
 
 async function startCamera(deviceId) {
   if (currentStream) {
+    console.log("Deteniendo tracks de currentStream anterior...");
     currentStream.getTracks().forEach(track => track.stop());
   }
 
@@ -380,7 +381,7 @@ async function startCamera(deviceId) {
       width: { ideal: 1280 },
       height: { ideal: 720 }
     },
-    audio: true
+    audio: true // Siempre solicitar audio para que currentStream lo tenga
   };
 
   try {
@@ -393,7 +394,9 @@ async function startCamera(deviceId) {
     currentFacingMode = settings.facingMode || 'unknown';
 
     // --- Web Audio API setup ---
-    if (currentStream.getAudioTracks().length > 0) {
+    const audioTracks = currentStream.getAudioTracks();
+    if (audioTracks.length > 0) {
+        console.log("Pista de audio disponible en currentStream.");
         if (!audioContext) {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             analyser = audioContext.createAnalyser();
@@ -401,14 +404,17 @@ async function startCamera(deviceId) {
             dataArray = new Uint8Array(analyser.frequencyBinCount);
         }
 
-        // Reconectar el micrófono cada vez que se inicia la cámara para asegurar un estado limpio
         if (microphone) {
-            microphone.disconnect(); // Desconectar si ya existía una conexión
+            microphone.disconnect(); 
+            console.log("Micrófono desconectado antes de reconectar.");
         }
         const audioSource = audioContext.createMediaStreamSource(currentStream);
         audioSource.connect(analyser);
-        microphone = audioSource; // Asignar el nuevo nodo de audio
+        // Opcional: Si quieres escuchar el audio del micrófono en vivo (sin grabar), conéctalo al destino.
+        // audioSource.connect(audioContext.destination); 
+        microphone = audioSource; 
     } else {
+        console.warn("No se encontraron pistas de audio en currentStream.");
         if (microphone) {
             microphone.disconnect();
             microphone = null;
@@ -652,15 +658,28 @@ recordBtn.addEventListener('click', async () => {
     console.log('Usando MIME type para grabación:', preferredMimeType);
     lastRecordedMimeType = preferredMimeType; // Store the MIME type used for recording
 
-    // ASIGNAR A LA VARIABLE GLOBAL recordingStream
-    recordingStream = targetCanvas.captureStream(); // Captura el video del canvas
-    
-    // Add audio track from currentStream if available
-    if (currentStream && currentStream.getAudioTracks().length > 0) {
-        recordingStream.addTrack(currentStream.getAudioTracks()[0]);
-    }
+    // --- NUEVO ENFOQUE: CREAR UN STREAM COMBINADO PARA EL MEDIARECORDER ---
+    const canvasStream = targetCanvas.captureStream();
+    recordingStreamForRecorder = new MediaStream(); // Creamos un nuevo MediaStream vacío
 
-    mediaRecorder = new MediaRecorder(recordingStream, { mimeType: preferredMimeType });
+    // Añadir las pistas de video del canvas
+    canvasStream.getVideoTracks().forEach(track => {
+        recordingStreamForRecorder.addTrack(track);
+        console.log("Pista de video del canvas añadida al stream de grabación.");
+    });
+
+    // Añadir las pistas de audio del stream original (currentStream)
+    if (currentStream && currentStream.getAudioTracks().length > 0) {
+        currentStream.getAudioTracks().forEach(track => {
+            recordingStreamForRecorder.addTrack(track);
+            console.log("Pista de audio del currentStream original añadida al stream de grabación.");
+        });
+    } else {
+        console.warn("No hay pistas de audio disponibles en currentStream para añadir al stream de grabación.");
+    }
+    // --- FIN NUEVO ENFOQUE ---
+
+    mediaRecorder = new MediaRecorder(recordingStreamForRecorder, { mimeType: preferredMimeType });
 
     mediaRecorder.ondataavailable = e => {
       if (e.data.size > 0) chunks.push(e.data);
@@ -670,19 +689,22 @@ recordBtn.addEventListener('click', async () => {
       const blob = new Blob(chunks, { type: lastRecordedMimeType }); // Use the stored MIME type for blob
       const url = URL.createObjectURL(blob);
 
-      // *** IMPORTANTE: Detener todas las pistas del recordingStream aquí ***
+      // *** IMPORTANTE: Detener todas las pistas del recordingStreamForRecorder aquí ***
       // Esto es CRÍTICO para liberar los recursos de audio y video
-      if (recordingStream) { // Asegurarse de que recordingStream exista
-          recordingStream.getTracks().forEach(track => track.stop());
-          recordingStream = null; // Limpiar la referencia para la próxima grabación
+      if (recordingStreamForRecorder) { 
+          console.log("Deteniendo tracks del recordingStreamForRecorder...");
+          recordingStreamForRecorder.getTracks().forEach(track => {
+              track.stop();
+              console.log(`Track detenido: ${track.kind}`);
+          });
+          recordingStreamForRecorder = null; // Limpiar la referencia para la próxima grabación
       }
       
-      // *** Desconectar explícitamente el nodo fuente del micrófono ***
+      // *** Desconectar explícitamente el nodo fuente del micrófono (Web Audio API) ***
       // Esto asegura que no queden conexiones de audio "colgadas" del stream en vivo.
       if (microphone) {
           microphone.disconnect();
-          // No nullificamos 'microphone' aquí, ya que 'startCamera' lo reconectará si es necesario
-          // para el monitoreo de audio en vivo.
+          console.log("Nodo de micrófono desconectado de Web Audio API.");
       }
 
       // *** Lógica para manejar la primera grabación ***
@@ -717,6 +739,7 @@ recordBtn.addEventListener('click', async () => {
     isRecording = true;
     controls.style.display = 'none';
     recordingControls.style.display = 'flex';
+    console.log("Grabación iniciada.");
   }
 });
 
@@ -724,9 +747,11 @@ pauseBtn.addEventListener('click', () => {
   if (isPaused) {
     mediaRecorder.resume();
     pauseBtn.textContent = '⏸️';
+    console.log("Grabación reanudada.");
   } else {
     mediaRecorder.pause();
     pauseBtn.textContent = '▶️';
+    console.log("Grabación pausada.");
   }
   isPaused = !isPaused;
 });
@@ -737,18 +762,20 @@ stopBtn.addEventListener('click', () => {
     isRecording = false;
     controls.style.display = 'flex';
     recordingControls.style.display = 'none';
+    console.log("Botón de Stop presionado. Estado del MediaRecorder:", mediaRecorder.state);
 
-    // *** IMPORTANTE: También detener las pistas directamente si se hace clic en stopBtn ***
-    // Esto proporciona una medida de seguridad si onstop se retrasa o si el estado necesita limpieza inmediata.
-    if (recordingStream) { // Asegurarse de que recordingStream exista
-        recordingStream.getTracks().forEach(track => track.stop());
-        recordingStream = null; // Limpiar la referencia
+    // Estas líneas se ejecutan en onstop también, pero como seguridad:
+    if (recordingStreamForRecorder) {
+        console.log("Deteniendo tracks del recordingStreamForRecorder desde stopBtn...");
+        recordingStreamForRecorder.getTracks().forEach(track => {
+            track.stop();
+            console.log(`Track detenido (stopBtn): ${track.kind}`);
+        });
+        recordingStreamForRecorder = null;
     }
-
-    // *** Desconectar explícitamente el nodo fuente del micrófono aquí también ***
     if (microphone) {
         microphone.disconnect();
-        // No nullificamos 'microphone' aquí, 'startCamera' lo reconectará.
+        console.log("Nodo de micrófono desconectado (stopBtn).");
     }
   }
 });
