@@ -42,7 +42,7 @@ let timeLocation; // Ubicación del uniform para el tiempo (para efectos dinámi
 // --- VARIABLES Y CONFIGURACIÓN DE AUDIO ---
 let audioContext;
 let analyser;
-let microphone;
+let microphone; // NODO CRUCIAL DEL MICROFONO
 let dataArray;
 const AUDIO_THRESHOLD = 0.15;
 
@@ -398,13 +398,13 @@ async function startCamera(deviceId) {
             dataArray = new Uint8Array(analyser.frequencyBinCount);
         }
 
+        // Reconectar el micrófono cada vez que se inicia la cámara para asegurar un estado limpio
         if (microphone) {
-            microphone.disconnect();
+            microphone.disconnect(); // Desconectar si ya existía una conexión
         }
-
         const audioSource = audioContext.createMediaStreamSource(currentStream);
         audioSource.connect(analyser);
-        microphone = audioSource;
+        microphone = audioSource; // Asignar el nuevo nodo de audio
     } else {
         if (microphone) {
             microphone.disconnect();
@@ -631,7 +631,6 @@ recordBtn.addEventListener('click', async () => {
         return;
     }
 
-    // Attempt to prioritize MP4 with common codecs, fallback to WebM
     let preferredMimeType = 'video/webm; codecs=vp8'; // Default fallback
     const possibleMimeTypes = [
         'video/mp4; codecs=avc1.42E01E,mp4a.40.2', // H.264 High Profile, AAC
@@ -684,6 +683,14 @@ recordBtn.addEventListener('click', async () => {
           recordingStream.getTracks().forEach(track => track.stop());
           recordingStream = null; // Limpiar la referencia para la próxima grabación
       }
+      
+      // *** NUEVA ADICIÓN: Desconectar explícitamente el nodo fuente del micrófono ***
+      // Esto asegura que no queden conexiones de audio "colgadas" del stream en vivo.
+      if (microphone) {
+          microphone.disconnect();
+          // No nullificamos 'microphone' aquí, ya que 'startCamera' lo reconectará si es necesario
+          // para el monitoreo de audio en vivo.
+      }
     };
 
     mediaRecorder.start();
@@ -716,6 +723,12 @@ stopBtn.addEventListener('click', () => {
     if (recordingStream) { // Asegurarse de que recordingStream exista
         recordingStream.getTracks().forEach(track => track.stop());
         recordingStream = null; // Limpiar la referencia
+    }
+
+    // *** NUEVA ADICIÓN: Desconectar explícitamente el nodo fuente del micrófono aquí también ***
+    if (microphone) {
+        microphone.disconnect();
+        // No nullificamos 'microphone' aquí, 'startCamera' lo reconectará.
     }
   }
 });
@@ -855,7 +868,7 @@ closeButton.addEventListener('click', () => {
     if (currentModalVideo) {
         currentModalVideo.pause();
         currentModalVideo.currentTime = 0; // Reset video to start
-        // ¡NUEVA LÓGICA AQUÍ! Revocar la URL del objeto si era un blob URL para liberar memoria
+        // Revocar la URL del objeto si era un blob URL para liberar memoria
         if (currentModalVideo.src && currentModalVideo.src.startsWith('blob:')) {
             URL.revokeObjectURL(currentModalVideo.src);
         }
@@ -872,7 +885,7 @@ window.addEventListener('click', (event) => {
         if (currentModalVideo) {
             currentModalVideo.pause();
             currentModalVideo.currentTime = 0; // Reset video to start
-            // ¡NUEVA LÓGICA AQUÍ! Revocar la URL del objeto si era un blob URL para liberar memoria
+            // Revocar la URL del objeto si era un blob URL para liberar memoria
             if (currentModalVideo.src && currentModalVideo.src.startsWith('blob:')) {
                 URL.revokeObjectURL(currentModalVideo.src);
             }
