@@ -28,7 +28,7 @@ let selectedFilter = 'none';
 let currentCameraDeviceId = null;
 let currentFacingMode = null; // 'user' (frontal) o 'environment' (trasera)
 let lastRecordedMimeType = ''; // Nueva variable para almacenar el MIME type de la última grabación
-let recordingStream = null; // Variable para almacenar el stream que usa mediaRecorder
+let recordingStream = null; // Variable crucial para almacenar el stream de grabación y sus pistas
 
 // --- VARIABLES Y CONFIGURACIÓN DE WEBG L ---
 let gl; // Contexto WebGL
@@ -650,14 +650,12 @@ recordBtn.addEventListener('click', async () => {
     console.log('Usando MIME type para grabación:', preferredMimeType);
     lastRecordedMimeType = preferredMimeType; // Store the MIME type used for recording
 
-    // Creamos un nuevo MediaStream combinando el video del canvas y el audio del currentStream
+    // ASIGNAR A LA VARIABLE GLOBAL recordingStream
     recordingStream = targetCanvas.captureStream(); // Captura el video del canvas
     
-    // Almacenar una referencia a la pista de audio original si existe
-    let originalAudioTrack = null; 
+    // Add audio track from currentStream if available
     if (currentStream && currentStream.getAudioTracks().length > 0) {
-        originalAudioTrack = currentStream.getAudioTracks()[0]; // Obtener la pista de audio original
-        recordingStream.addTrack(originalAudioTrack); // Añadir la pista de audio
+        recordingStream.addTrack(currentStream.getAudioTracks()[0]);
     }
 
     mediaRecorder = new MediaRecorder(recordingStream, { mimeType: preferredMimeType });
@@ -680,17 +678,12 @@ recordBtn.addEventListener('click', async () => {
         addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
       };
 
-      // Detener todas las pistas del recordingStream.
-      // Esto incluye la pista de video del canvas y la pista de audio que se añadió.
-      if (recordingStream) {
+      // *** IMPORTANTE: Detener todas las pistas del recordingStream aquí ***
+      // Esto es CRÍTICO para liberar los recursos de audio y video
+      if (recordingStream) { // Asegurarse de que recordingStream exista
           recordingStream.getTracks().forEach(track => track.stop());
-          recordingStream = null; // Reiniciar la variable
+          recordingStream = null; // Limpiar la referencia para la próxima grabación
       }
-      // Opcional: Si el problema persiste con el primer audio, puedes intentar descomentar la siguiente línea.
-      // Sin embargo, ten cuidado ya que podría silenciar el audio de la previsualización de la cámara en vivo.
-      // if (originalAudioTrack && originalAudioTrack.readyState === 'live') {
-      //     originalAudioTrack.stop();
-      // }
     };
 
     mediaRecorder.start();
@@ -713,17 +706,16 @@ pauseBtn.addEventListener('click', () => {
 
 stopBtn.addEventListener('click', () => {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') { // Asegurarse de que mediaRecorder esté activo
-    mediaRecorder.stop();
+    mediaRecorder.stop(); // Esto dispara el evento onstop
     isRecording = false;
     controls.style.display = 'flex';
     recordingControls.style.display = 'none';
 
-    // Asegurarse de que el recordingStream y sus pistas se detengan aquí también
-    // Esto es redundante con mediaRecorder.onstop, pero asegura la liberación
-    // incluso si onstop tiene un problema.
-    if (recordingStream) {
+    // *** IMPORTANTE: También detener las pistas directamente si se hace clic en stopBtn ***
+    // Esto proporciona una medida de seguridad si onstop se retrasa o si el estado necesita limpieza inmediata.
+    if (recordingStream) { // Asegurarse de que recordingStream exista
         recordingStream.getTracks().forEach(track => track.stop());
-        recordingStream = null;
+        recordingStream = null; // Limpiar la referencia
     }
   }
 });
@@ -879,7 +871,7 @@ window.addEventListener('click', (event) => {
         const currentModalVideo = modalContent.querySelector('video');
         if (currentModalVideo) {
             currentModalVideo.pause();
-            currentModalVideo.currentTime = 0;
+            currentModalVideo.currentTime = 0; // Reset video to start
             // ¡NUEVA LÓGICA AQUÍ! Revocar la URL del objeto si era un blob URL para liberar memoria
             if (currentModalVideo.src && currentModalVideo.src.startsWith('blob:')) {
                 URL.revokeObjectURL(currentModalVideo.src);
