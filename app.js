@@ -669,29 +669,6 @@ recordBtn.addEventListener('click', async () => {
     mediaRecorder.onstop = async () => {
       const blob = new Blob(chunks, { type: lastRecordedMimeType }); // Use the stored MIME type for blob
       const url = URL.createObjectURL(blob);
-      let vid = document.createElement('video');
-      vid.src = url;
-      // Set autoplay and controls for the video in the modal
-      vid.autoplay = true;
-      vid.controls = true;
-      vid.loop = true; // Loop for better preview experience
-
-      vid.onloadedmetadata = () => {
-        // *** Lógica para manejar la primera grabación ***
-        if (isFirstRecording) {
-            console.warn("Primera grabación completada. No se guardará en la galería para evitar errores de audio iniciales. Por favor, graba de nuevo.");
-            alert("Primera grabación completada (solo inicialización). Por favor, graba de nuevo para guardar el video.");
-            isFirstRecording = false; // Desactivar el flag después de la primera "inicialización"
-            // Opcional: Cerrar el modal automáticamente después del mensaje
-            previewModal.style.display = 'none'; 
-            // Revocar la URL del blob de inmediato para liberar recursos
-            if (vid.src && vid.src.startsWith('blob:')) {
-                URL.revokeObjectURL(vid.src);
-            }
-        } else {
-            addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
-        }
-      };
 
       // *** IMPORTANTE: Detener todas las pistas del recordingStream aquí ***
       // Esto es CRÍTICO para liberar los recursos de audio y video
@@ -707,6 +684,33 @@ recordBtn.addEventListener('click', async () => {
           // No nullificamos 'microphone' aquí, ya que 'startCamera' lo reconectará si es necesario
           // para el monitoreo de audio en vivo.
       }
+
+      // *** Lógica para manejar la primera grabación ***
+      if (isFirstRecording) {
+          console.warn("Primera grabación completada. No se guardará en la galería. Por favor, graba de nuevo.");
+          alert("Primera grabación completada (solo inicialización). Por favor, graba de nuevo para guardar el video.");
+          isFirstRecording = false; // Desactivar el flag después de la primera "inicialización"
+          // Revocar la URL inmediatamente ya que no se va a usar para la vista previa ni la galería
+          URL.revokeObjectURL(url);
+          return; // Salir de la función para no procesar más este video
+      }
+
+      // Si no es la primera grabación, procede con la vista previa en el modal y añade a la galería
+      let vid = document.createElement('video');
+      vid.src = url;
+      // Set autoplay and controls for the video in the modal
+      vid.autoplay = true;
+      vid.controls = true;
+      vid.loop = true; // Loop for better preview experience
+
+      vid.onloadedmetadata = () => {
+        addToGallery(vid, 'video', url, lastRecordedMimeType); // Pass mimeType to addToGallery
+      };
+
+      // Limpiar el contenido previo en el modal y añadir el nuevo video
+      modalContent.innerHTML = ''; 
+      modalContent.appendChild(vid);
+      previewModal.style.display = 'flex'; // Mostrar modal usando flex para centrar
     };
 
     mediaRecorder.start();
